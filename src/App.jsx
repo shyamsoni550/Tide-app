@@ -107,7 +107,7 @@ function App() {
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 1800000, // 30 minutes
         maximumAge: 300000 // 5 minutes
       }
     );

@@ -1,16 +1,21 @@
 import { useState, useEffect } from "react";
 import { fetchTideData } from "./api/tideapi";
+import { saveUserLocation } from "./api/savedLocations";
+import AuthForm from "./components/AuthForm";
+import { useAuth } from "./hooks/useAuth";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 
 function App() {
+  const auth = useAuth();
+  const [guestMode, setGuestMode] = useState(false);
   const [tide, setTide] = useState(null);
   const [nextHighTide, setNextHighTide] = useState(null);
   const [nextLowTide, setNextLowTide] = useState(null);
-  const [allTides, setAllTides] = useState([]);
+  const [marine, setMarine] = useState(null);
+  const [marineDisclaimer, setMarineDisclaimer] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [location, setLocation] = useState(null);
   const [city, setCity] = useState("");
   const [coordinates, setCoordinates] = useState(null);
   const [storedLocation, setStoredLocation] = useLocalStorage('tideLocation', null);
@@ -38,7 +43,7 @@ function App() {
       setCity(storedLocation.city);
       // Optionally fetch tides automatically, but for now, just set the data
     }
-  }, [storedLocation]);
+  }, [storedLocation, coordinates]);
 
   // Reverse geocoding to get city name
   const getCityName = async (latitude, longitude) => {
@@ -70,9 +75,19 @@ function App() {
 
           // Store location
           setStoredLocation({ latitude, longitude, city: cityName });
+          saveUserLocation({
+            userId: auth.user?.id,
+            city: cityName,
+            latitude,
+            longitude
+          }).catch((saveError) => {
+            console.error("Unable to save location:", saveError);
+          });
 
           // Get tide data
           const data = await fetchTideData(latitude, longitude);
+          setMarine(data.current);
+          setMarineDisclaimer(data.disclaimer);
 
           // Fetch weather data for recommendations
           const weatherResponse = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&windspeed_unit=ms&timezone=auto`);
@@ -91,9 +106,8 @@ function App() {
             setTide(nextTide);
             setNextHighTide(nextHighTide);
             setNextLowTide(nextLowTide);
-            setAllTides(data.extremes.slice(0, 6)); // Show next 6 tides for better grid layout
           } else {
-            setError("No tide data available for this location");
+            setError("No modeled tide extremes are available for this location");
           }
         } catch (err) {
           setError(`Failed to fetch data: ${err.message}`);
@@ -117,9 +131,9 @@ function App() {
     setTide(null);
     setNextHighTide(null);
     setNextLowTide(null);
-    setAllTides([]);
+    setMarine(null);
+    setMarineDisclaimer("");
     setError(null);
-    setLocation(null);
     setCity("");
     setCoordinates(null);
     setStoredLocation(null);
@@ -158,7 +172,6 @@ function App() {
   const getMoonPhase = () => {
     const now = new Date();
     const year = now.getFullYear();
-    const month = now.getMonth() + 1;
     const day = now.getDate();
     const c = Math.floor((year - 1900) * 12.3684);
     const e = 365.25 * (year - 1900);
@@ -234,11 +247,44 @@ function App() {
     return recommendations.slice(0, 3); // Limit to top 3
   };
 
+  if (auth.loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        Loading your account...
+      </div>
+    );
+  }
+
+  if (!auth.session && !guestMode) {
+    return (
+      <AuthForm
+        isConfigured={auth.isConfigured}
+        onSignIn={auth.signIn}
+        onSignUp={auth.signUp}
+        onContinueAsGuest={() => setGuestMode(true)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-100 via-blue-100 to-indigo-100 dark:from-slate-900 dark:via-blue-900 dark:to-indigo-900 p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8 pt-8 relative">
+          {auth.user && (
+            <div className="absolute left-0 top-0 flex items-center gap-3">
+              <span className="hidden text-sm text-slate-600 dark:text-slate-300 sm:inline">
+                {auth.user.user_metadata?.full_name || auth.user.email}
+              </span>
+              <button
+                type="button"
+                onClick={auth.signOut}
+                className="rounded-md border border-slate-300 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
           <button
             onClick={toggleDarkMode}
             className="absolute top-0 right-0 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
@@ -321,6 +367,47 @@ function App() {
           </div>
         )}
 
+        {/* Open-Meteo Marine Conditions */}
+        {marine && (
+          <div className="mb-8 rounded-2xl border border-cyan-300/40 bg-white/70 p-6 shadow-xl backdrop-blur-md dark:bg-slate-800/70">
+            <div className="mb-5">
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Marine Conditions</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Open-Meteo Marine forecast for your coordinates</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Sea level</div>
+                <div className="text-xl font-bold text-slate-900 dark:text-white">
+                  {marine.sea_level_height_msl?.toFixed(2) ?? "N/A"} m
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Wave height</div>
+                <div className="text-xl font-bold text-slate-900 dark:text-white">
+                  {marine.wave_height?.toFixed(1) ?? "N/A"} m
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Wave period</div>
+                <div className="text-xl font-bold text-slate-900 dark:text-white">
+                  {marine.wave_period?.toFixed(1) ?? "N/A"} s
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-slate-500 dark:text-slate-400">Swell height</div>
+                <div className="text-xl font-bold text-slate-900 dark:text-white">
+                  {marine.swell_wave_height?.toFixed(1) ?? "N/A"} m
+                </div>
+              </div>
+            </div>
+            {marineDisclaimer && (
+              <p className="mt-5 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                {marineDisclaimer}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Next Tides Card - Highlighted */}
         {(nextHighTide || nextLowTide) && (
           <div className="bg-gradient-to-r from-cyan-100/25 to-blue-100/25 dark:from-cyan-500/25 dark:to-blue-500/25 backdrop-blur-md rounded-3xl p-8 mb-8 border border-cyan-300/40 shadow-2xl">
@@ -386,7 +473,7 @@ function App() {
         {/* Footer */}
         <div className="text-center mt-12 pb-8">
           <p className="text-slate-500 dark:text-slate-400 text-lg">
-            Powered by WorldTides API
+            Powered by Open-Meteo Marine API
           </p>
         </div>
       </div>

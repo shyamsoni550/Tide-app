@@ -1,13 +1,48 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { motion as Motion } from "framer-motion";
+import {
+  Anchor,
+  Activity,
+  AlertCircle,
+  Compass,
+  LocateFixed,
+  LogOut,
+  MapPin,
+  Navigation,
+  Sailboat,
+  Sparkles,
+  Thermometer,
+  Trash2,
+  Waves,
+  Wind,
+} from "lucide-react";
 import { fetchTideData } from "./api/tideapi";
 import { saveUserLocation } from "./api/savedLocations";
 import AuthForm from "./components/AuthForm";
+import MetricCard from "./components/MetricCard";
+import TideChart from "./components/TideChart";
 import { useAuth } from "./hooks/useAuth";
 import { useLocalStorage } from "./hooks/useLocalStorage";
+
+const navItems = [
+  { label: "Overview", icon: Anchor },
+  { label: "Tides", icon: Waves },
+  { label: "Routes", icon: Compass },
+];
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 18 },
+  show: (index = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.45, delay: index * 0.08 },
+  }),
+};
 
 function App() {
   const auth = useAuth();
   const [guestMode, setGuestMode] = useState(false);
+  const [tideInfo, setTideInfo] = useState(null);
   const [tide, setTide] = useState(null);
   const [nextHighTide, setNextHighTide] = useState(null);
   const [nextLowTide, setNextLowTide] = useState(null);
@@ -18,34 +53,25 @@ function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [city, setCity] = useState("");
   const [coordinates, setCoordinates] = useState(null);
-  const [storedLocation, setStoredLocation] = useLocalStorage('tideLocation', null);
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [storedLocation, setStoredLocation] = useLocalStorage("tideLocation", null);
   const [weather, setWeather] = useState(null);
 
-  // Update current time every second
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Handle dark mode toggle
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDarkMode);
-  }, [isDarkMode]);
+    document.documentElement.classList.add("dark");
+  }, []);
 
-  // Load stored location on mount
   useEffect(() => {
     if (storedLocation && !coordinates) {
       setCoordinates({ latitude: storedLocation.latitude, longitude: storedLocation.longitude });
       setCity(storedLocation.city);
-      // Optionally fetch tides automatically, but for now, just set the data
     }
   }, [storedLocation, coordinates]);
 
-  // Reverse geocoding to get city name
   const getCityName = async (latitude, longitude) => {
     try {
       const response = await fetch(
@@ -53,9 +79,30 @@ function App() {
       );
       const data = await response.json();
       return data.city || data.locality || data.principalSubdivision || "Unknown Location";
-    } catch (error) {
-      console.error("Error fetching city name:", error);
+    } catch (cityError) {
+      console.error("Error fetching city name:", cityError);
       return "Unknown Location";
+    }
+  };
+
+  const hydrateForecast = async (latitude, longitude, cityName) => {
+    const data = await fetchTideData(latitude, longitude);
+    setTideInfo(data);
+    setMarine(data.current);
+    setMarineDisclaimer(data.disclaimer);
+
+    const weatherResponse = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&windspeed_unit=ms&timezone=auto`
+    );
+    setWeather(weatherResponse.ok ? (await weatherResponse.json()).current_weather : null);
+
+    if (data.extremes?.length) {
+      const now = new Date();
+      setTide(data.extremes.find((event) => new Date(event.date) > now));
+      setNextHighTide(data.extremes.find((event) => new Date(event.date) > now && event.type === "High"));
+      setNextLowTide(data.extremes.find((event) => new Date(event.date) > now && event.type === "Low"));
+    } else {
+      setError(`No modeled tide extremes are available near ${cityName}.`);
     }
   };
 
@@ -69,100 +116,68 @@ function App() {
         setCoordinates({ latitude, longitude });
 
         try {
-          // Get city name
           const cityName = await getCityName(latitude, longitude);
           setCity(cityName);
-
-          // Store location
           setStoredLocation({ latitude, longitude, city: cityName });
+
           saveUserLocation({
             userId: auth.user?.id,
             city: cityName,
             latitude,
-            longitude
+            longitude,
           }).catch((saveError) => {
             console.error("Unable to save location:", saveError);
           });
 
-          // Get tide data
-          const data = await fetchTideData(latitude, longitude);
-          setMarine(data.current);
-          setMarineDisclaimer(data.disclaimer);
-
-          // Fetch weather data for recommendations
-          const weatherResponse = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&windspeed_unit=ms&timezone=auto`);
-          if (weatherResponse.ok) {
-            const weatherData = await weatherResponse.json();
-            setWeather(weatherData.current_weather);
-          } else {
-            setWeather(null);
-          }
-
-          if (data.extremes && data.extremes.length > 0) {
-            const now = new Date();
-            const nextTide = data.extremes.find(e => new Date(e.date) > now);
-            const nextHighTide = data.extremes.find(e => new Date(e.date) > now && e.type === "High");
-            const nextLowTide = data.extremes.find(e => new Date(e.date) > now && e.type === "Low");
-            setTide(nextTide);
-            setNextHighTide(nextHighTide);
-            setNextLowTide(nextLowTide);
-          } else {
-            setError("No modeled tide extremes are available for this location");
-          }
-        } catch (err) {
-          setError(`Failed to fetch data: ${err.message}`);
+          await hydrateForecast(latitude, longitude, cityName);
+        } catch (forecastError) {
+          setError(`Failed to fetch data: ${forecastError.message}`);
         } finally {
           setLoading(false);
         }
       },
-      (err) => {
-        setError(`Location access denied: ${err.message}`);
+      (geoError) => {
+        setError(`Location access denied: ${geoError.message}`);
         setLoading(false);
       },
       {
         enableHighAccuracy: true,
-        timeout: 1800000, // 30 minutes
-        maximumAge: 300000 // 5 minutes
+        timeout: 1800000,
+        maximumAge: 300000,
       }
     );
   };
 
   const clearLocation = () => {
+    setTideInfo(null);
     setTide(null);
     setNextHighTide(null);
     setNextLowTide(null);
     setMarine(null);
     setMarineDisclaimer("");
+    setWeather(null);
     setError(null);
     setCity("");
     setCoordinates(null);
     setStoredLocation(null);
   };
 
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-  };
-
-  const formatTime = (dateString) => {
-    return new Date(dateString).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
+  const formatTime = (dateString) =>
+    new Date(dateString).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
     });
-  };
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric'
+  const formatDate = (dateString) =>
+    new Date(dateString).toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
     });
-  };
 
   const getTimeUntilNextTide = (tideDate) => {
-    const now = new Date();
-    const tideTime = new Date(tideDate);
-    const diff = tideTime - now;
+    const diff = new Date(tideDate) - new Date();
     if (diff <= 0) return "Passed";
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -189,68 +204,39 @@ function App() {
     return "New Moon";
   };
 
-  const getAIRecommendations = () => {
+  const recommendations = useMemo(() => {
     if (!tide || !weather) return [];
 
-    const recommendations = [];
+    const next = [];
     const moonPhase = getMoonPhase();
     const currentHour = new Date().getHours();
     const isDaytime = currentHour >= 6 && currentHour <= 18;
     const windSpeed = weather.windspeed;
     const temperature = weather.temperature;
 
-    // Surfing
     if (tide.type === "High" && windSpeed < 5 && temperature > 15 && isDaytime) {
-      recommendations.push({
-        activity: "Surfing",
-        reason: "High tide with calm winds and good temperature - perfect wave conditions!",
-        icon: "🏄‍♂️"
-      });
+      next.push({ activity: "Surfing", reason: "High tide, calm wind, and comfortable temperature.", icon: Waves });
     }
-
-    // Fishing
     if (tide.type === "Low" && (moonPhase === "Full Moon" || moonPhase === "New Moon") && currentHour >= 5 && currentHour <= 9) {
-      recommendations.push({
-        activity: "Fishing",
-        reason: "Low tide during major moon phase and dawn - optimal fishing time!",
-        icon: "🎣"
-      });
+      next.push({ activity: "Fishing", reason: "Low tide near a major moon phase during the morning window.", icon: Anchor });
     }
-
-    // Beach Walks
     if (tide.type === "Low" && windSpeed < 10 && temperature > 10) {
-      recommendations.push({
-        activity: "Beach Walks",
-        reason: "Low tide exposes more sand, calm weather for a pleasant walk.",
-        icon: "🚶‍♂️"
-      });
+      next.push({ activity: "Beach walk", reason: "Low tide opens more shoreline with manageable wind.", icon: Navigation });
     }
-
-    // Swimming
     if (tide.type === "High" && temperature > 20 && windSpeed < 5) {
-      recommendations.push({
-        activity: "Swimming",
-        reason: "High tide with warm water and calm conditions - safe and enjoyable!",
-        icon: "🏊‍♂️"
-      });
+      next.push({ activity: "Swimming", reason: "Warmer conditions and calm wind create a better swim window.", icon: Activity });
     }
-
-    // Boating
     if (tide.type === "High" && windSpeed < 8 && isDaytime) {
-      recommendations.push({
-        activity: "Boating",
-        reason: "High tide with moderate winds - ideal for boating activities.",
-        icon: "⛵"
-      });
+      next.push({ activity: "Boating", reason: "High water and moderate wind are favorable for light boating.", icon: Sailboat });
     }
 
-    return recommendations.slice(0, 3); // Limit to top 3
-  };
+    return next.slice(0, 3);
+  }, [tide, weather]);
 
   if (auth.loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-        Loading your account...
+      <div className="flex min-h-screen items-center justify-center bg-ocean-night text-white">
+        <div className="glass-panel rounded-3xl px-8 py-6 font-display text-lg">Loading your account...</div>
       </div>
     );
   }
@@ -267,217 +253,247 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-100 via-blue-100 to-indigo-100 dark:from-slate-900 dark:via-blue-900 dark:to-indigo-900 p-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8 pt-8 relative">
-          {auth.user && (
-            <div className="absolute left-0 top-0 flex items-center gap-3">
-              <span className="hidden text-sm text-slate-600 dark:text-slate-300 sm:inline">
-                {auth.user.user_metadata?.full_name || auth.user.email}
-              </span>
-              <button
-                type="button"
-                onClick={auth.signOut}
-                className="rounded-md border border-slate-300 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-white dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
-              >
-                Sign out
-              </button>
-            </div>
-          )}
-          <button
-            onClick={toggleDarkMode}
-            className="absolute top-0 right-0 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-          >
-            {isDarkMode ? '☀️' : '🌙'}
-          </button>
-          <h1 className="text-5xl font-bold text-gray-900 dark:text-white mb-3">🌊 Tide Tracker</h1>
-          <p className="text-blue-600 dark:text-blue-200 text-lg">Stay updated with tide information</p>
-        </div>
-
-        {/* Current Time & Location Card - Different Color Scheme */}
-        <div className="bg-gradient-to-r from-amber-100/20 to-orange-100/20 dark:from-amber-500/20 dark:to-orange-500/20 backdrop-blur-md rounded-3xl p-8 mb-8 border border-amber-300/30 dark:border-amber-300/30 shadow-2xl">
-          <div className="text-center">
-            <div className="text-4xl font-bold text-amber-900 dark:text-amber-100 mb-3">
-              {currentTime.toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-              })}
-            </div>
-            <div className="text-amber-700 dark:text-amber-200 text-lg mb-4">
-              {currentTime.toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })}
-            </div>
-            {city && (
-              <div className="flex items-center justify-center text-amber-900 dark:text-amber-100 bg-amber-200/20 dark:bg-amber-500/20 rounded-full px-6 py-2 mx-auto w-fit">
-                <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                </svg>
-                <span className="font-semibold text-lg">{city}</span>
-              </div>
-            )}
+    <main className="min-h-screen overflow-hidden bg-ocean-night text-white">
+      <div className="fixed inset-0 bg-ocean-radial" />
+      <div className="fixed inset-0 ocean-grid opacity-35" />
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-4 lg:flex-row lg:px-6">
+        <aside className="glass-panel flex items-center justify-between rounded-3xl p-4 lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:w-24 lg:flex-col">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-ocean-cyan to-ocean-teal text-ocean-night shadow-glow">
+            <Waves className="h-6 w-6" />
           </div>
-        </div>
-
-        {/* Action Button - Different Color Scheme */}
-        <div className="text-center mb-8">
-          {!coordinates ? (
+          <nav className="flex gap-2 lg:flex-col">
+            {navItems.map((item) => (
+              <button
+                key={item.label}
+                className="group relative rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-slate-400 transition hover:border-ocean-cyan/30 hover:text-ocean-cyan"
+                title={item.label}
+              >
+                <item.icon className="h-5 w-5" />
+              </button>
+            ))}
+          </nav>
+          {auth.user ? (
             <button
-              onClick={fetchLocationAndTides}
-              disabled={loading}
-              className="bg-gradient-to-r from-emerald-400 to-teal-500 dark:from-emerald-500 dark:to-teal-600 text-white px-10 py-4 rounded-full font-bold text-lg shadow-2xl hover:from-emerald-500 hover:to-teal-600 dark:hover:from-emerald-600 dark:hover:to-teal-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105"
+              type="button"
+              onClick={auth.signOut}
+              className="rounded-2xl border border-white/10 p-3 text-slate-400 transition hover:border-ocean-teal/40 hover:text-ocean-teal"
+              title="Sign out"
             >
-              {loading ? (
-                <div className="flex items-center">
-                  <svg className="animate-spin -ml-1 mr-3 h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Getting Location...
-                </div>
-              ) : (
-                "📍 Get Tide Information"
-              )}
+              <LogOut className="h-5 w-5" />
             </button>
           ) : (
-            <button
-              onClick={clearLocation}
-              className="bg-gradient-to-r from-red-400 to-pink-500 dark:from-red-500 dark:to-pink-600 text-white px-10 py-4 rounded-full font-bold text-lg shadow-2xl hover:from-red-500 hover:to-pink-600 dark:hover:from-red-600 dark:hover:to-pink-700 transition-all duration-300 transform hover:scale-105"
-            >
-              🗑️ Clear Location
-            </button>
+            <span className="rounded-full border border-ocean-teal/30 px-3 py-1 text-xs font-bold text-ocean-teal lg:-rotate-90">
+              Guest
+            </span>
           )}
-        </div>
+        </aside>
 
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-100/20 dark:bg-red-500/20 backdrop-blur-md border border-red-300/30 rounded-2xl p-6 mb-8">
-            <div className="flex items-center text-red-900 dark:text-red-100">
-              <svg className="w-6 h-6 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
-              <span className="text-lg">{error}</span>
+        <section className="flex-1 space-y-5 pb-8">
+          <Motion.header
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-panel relative overflow-hidden rounded-[2rem] p-6 sm:p-8"
+          >
+            <div className="absolute right-[-6rem] top-[-8rem] h-72 w-72 rounded-full bg-ocean-cyan/20 blur-3xl" />
+            <div className="relative grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div>
+                <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-ocean-cyan/20 bg-ocean-cyan/10 px-4 py-2 text-sm font-bold text-ocean-cyan">
+                  <Sparkles className="h-4 w-4" />
+                  Open-Meteo Marine powered forecast
+                </p>
+                <h1 className="font-display text-4xl font-bold uppercase tracking-[0.14em] text-white sm:text-5xl">
+                  Tide Tracker
+                </h1>
+                <p className="mt-4 max-w-2xl text-slate-300">
+                  A modern coastal dashboard for tide windows, marine conditions, wind, and activity recommendations.
+                </p>
+              </div>
+              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 text-right">
+                <div className="font-display text-3xl font-bold text-white">
+                  {currentTime.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })}
+                </div>
+                <div className="mt-1 text-sm text-slate-400">
+                  {currentTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                </div>
+              </div>
             </div>
+          </Motion.header>
+
+          <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+            <Motion.section
+              initial="hidden"
+              animate="show"
+              className="glass-panel rounded-[2rem] p-6 sm:p-7"
+            >
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ocean-muted">Current station</p>
+                  <h2 className="mt-3 font-display text-3xl font-bold text-white">
+                    {city || "Find your coast"}
+                  </h2>
+                  <p className="mt-2 text-sm text-slate-400">
+                    {coordinates
+                      ? `${coordinates.latitude.toFixed(4)}, ${coordinates.longitude.toFixed(4)}`
+                      : "Use your device location to pull live modeled marine data."}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                    <Motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={fetchLocationAndTides}
+                    disabled={loading}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-ocean-cyan to-ocean-teal px-5 py-3 font-bold text-ocean-night shadow-glow transition disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <LocateFixed className="h-5 w-5" />
+                    {loading ? "Locating..." : coordinates ? "Refresh" : "Get tide info"}
+                    </Motion.button>
+                  {coordinates && (
+                    <button
+                      onClick={clearLocation}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 px-5 py-3 font-bold text-slate-300 transition hover:border-rose-400/40 hover:text-rose-200"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {error && (
+                <div className="mt-6 flex items-start gap-3 rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-rose-100">
+                  <AlertCircle className="mt-0.5 h-5 w-5 flex-none" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </Motion.section>
+
+            <Motion.section
+              custom={1}
+              variants={cardVariants}
+              initial="hidden"
+              animate="show"
+              className="glass-panel rounded-[2rem] p-6 sm:p-7"
+            >
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl bg-ocean-teal/10 p-3 text-ocean-teal">
+                  <MapPin className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-400">Signed in as</p>
+                  <p className="font-semibold text-white">
+                    {auth.user?.user_metadata?.full_name || auth.user?.email || "Guest explorer"}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-5 text-sm leading-6 text-slate-400">
+                Saved locations sync to Supabase when you are logged in. Guest mode stores the latest location in this browser.
+              </p>
+            </Motion.section>
           </div>
-        )}
 
-        {/* Open-Meteo Marine Conditions */}
-        {marine && (
-          <div className="mb-8 rounded-2xl border border-cyan-300/40 bg-white/70 p-6 shadow-xl backdrop-blur-md dark:bg-slate-800/70">
-            <div className="mb-5">
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Marine Conditions</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-300">Open-Meteo Marine forecast for your coordinates</p>
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Sea level" value={marine?.sea_level_height_msl} unit="m" icon={Waves} delay={0.05} />
+            <MetricCard label="Wave height" value={marine?.wave_height} unit="m" icon={Activity} accent="teal" delay={0.1} />
+            <MetricCard label="Wind speed" value={weather?.windspeed} unit="m/s" icon={Wind} delay={0.15} />
+            <MetricCard label="Temperature" value={weather?.temperature} unit="deg" icon={Thermometer} accent="teal" delay={0.2} />
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
+            <Motion.section
+              custom={2}
+              variants={cardVariants}
+              initial="hidden"
+              animate="show"
+              className="glass-panel rounded-[2rem] p-5 sm:p-7"
+            >
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ocean-muted">Tide curve</p>
+                  <h2 className="mt-2 font-display text-2xl font-bold text-white">Next modeled extremes</h2>
+                </div>
+                <span className="rounded-full border border-ocean-cyan/20 px-3 py-1 text-xs font-bold text-ocean-cyan">
+                  72h view
+                </span>
+              </div>
+              {tideInfo?.extremes?.length ? (
+                <TideChart tideInfo={tideInfo} />
+              ) : (
+                <div className="flex h-[320px] items-center justify-center rounded-3xl border border-dashed border-white/10 text-center text-slate-400">
+                  Fetch your location to render the glowing tide chart.
+                </div>
+              )}
+            </Motion.section>
+
+            <Motion.section
+              custom={3}
+              variants={cardVariants}
+              initial="hidden"
+              animate="show"
+              className="space-y-5"
+            >
+              {[nextHighTide, nextLowTide].map((item, index) => (
+                <div key={item?.type || index} className="glass-panel rounded-[2rem] p-6">
+                  <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ocean-muted">
+                    {index === 0 ? "Next high" : "Next low"}
+                  </p>
+                  {item ? (
+                    <>
+                      <h3 className="mt-3 font-display text-3xl font-bold text-white">{item.height.toFixed(2)} m</h3>
+                      <p className="mt-2 text-slate-300">
+                        {formatDate(item.date)} at {formatTime(item.date)}
+                      </p>
+                      <p className="mt-4 inline-flex rounded-full bg-white/[0.05] px-3 py-1 text-sm font-bold text-ocean-cyan">
+                        {getTimeUntilNextTide(item.date)}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-4 text-slate-400">Waiting for tide data.</p>
+                  )}
+                </div>
+              ))}
+            </Motion.section>
+          </div>
+
+          <Motion.section
+            custom={4}
+            variants={cardVariants}
+            initial="hidden"
+            animate="show"
+            className="glass-panel rounded-[2rem] p-6 sm:p-7"
+          >
+            <div className="mb-6 flex items-center gap-3">
+              <div className="rounded-2xl bg-ocean-teal/10 p-3 text-ocean-teal">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-ocean-muted">AI activity picks</p>
+                <h2 className="font-display text-2xl font-bold text-white">Best coastal windows</h2>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              <div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">Sea level</div>
-                <div className="text-xl font-bold text-slate-900 dark:text-white">
-                  {marine.sea_level_height_msl?.toFixed(2) ?? "N/A"} m
-                </div>
+            {recommendations.length ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                {recommendations.map((rec) => (
+                  <div key={rec.activity} className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+                    <rec.icon className="mb-5 h-6 w-6 text-ocean-cyan" />
+                    <h3 className="font-display text-xl font-bold text-white">{rec.activity}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">{rec.reason}</p>
+                  </div>
+                ))}
               </div>
-              <div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">Wave height</div>
-                <div className="text-xl font-bold text-slate-900 dark:text-white">
-                  {marine.wave_height?.toFixed(1) ?? "N/A"} m
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">Wave period</div>
-                <div className="text-xl font-bold text-slate-900 dark:text-white">
-                  {marine.wave_period?.toFixed(1) ?? "N/A"} s
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-slate-500 dark:text-slate-400">Swell height</div>
-                <div className="text-xl font-bold text-slate-900 dark:text-white">
-                  {marine.swell_wave_height?.toFixed(1) ?? "N/A"} m
-                </div>
-              </div>
-            </div>
-            {marineDisclaimer && (
-              <p className="mt-5 border-t border-slate-200 pt-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                {marineDisclaimer}
+            ) : (
+              <p className="rounded-3xl border border-dashed border-white/10 p-6 text-slate-400">
+                Fetch tide and weather data to generate activity recommendations.
               </p>
             )}
-          </div>
-        )}
+          </Motion.section>
 
-        {/* Next Tides Card - Highlighted */}
-        {(nextHighTide || nextLowTide) && (
-          <div className="bg-gradient-to-r from-cyan-100/25 to-blue-100/25 dark:from-cyan-500/25 dark:to-blue-500/25 backdrop-blur-md rounded-3xl p-8 mb-8 border border-cyan-300/40 shadow-2xl">
-            <h2 className="text-2xl font-bold text-cyan-900 dark:text-cyan-100 mb-6 text-center">🎯 Next Tides</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {nextHighTide && (
-                <div className="text-center">
-                  <div className="text-4xl mb-3">🌊</div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Next High Tide</div>
-                  <div className="text-cyan-700 dark:text-cyan-200 text-lg mb-2">
-                    {formatDate(nextHighTide.date)} at {formatTime(nextHighTide.date)}
-                  </div>
-                  <div className="text-cyan-600 dark:text-cyan-300 text-base mb-2">
-                    Time until: {getTimeUntilNextTide(nextHighTide.date)}
-                  </div>
-                  <div className="text-xl font-bold text-cyan-900 dark:text-cyan-100 bg-cyan-200/20 dark:bg-cyan-500/20 rounded-full px-4 py-2">
-                    {nextHighTide.height.toFixed(2)}m
-                  </div>
-                </div>
-              )}
-              {nextLowTide && (
-                <div className="text-center">
-                  <div className="text-4xl mb-3">🏖️</div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Next Low Tide</div>
-                  <div className="text-cyan-700 dark:text-cyan-200 text-lg mb-2">
-                    {formatDate(nextLowTide.date)} at {formatTime(nextLowTide.date)}
-                  </div>
-                  <div className="text-cyan-600 dark:text-cyan-300 text-base mb-2">
-                    Time until: {getTimeUntilNextTide(nextLowTide.date)}
-                  </div>
-                  <div className="text-xl font-bold text-cyan-900 dark:text-cyan-100 bg-cyan-200/20 dark:bg-cyan-500/20 rounded-full px-4 py-2">
-                    {nextLowTide.height.toFixed(2)}m
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* AI-Based Activity Recommendations */}
-        {tide && weather && (
-          <div className="bg-gradient-to-r from-green-100/25 to-emerald-100/25 dark:from-green-500/25 dark:to-emerald-500/25 backdrop-blur-md rounded-3xl p-8 mb-8 border border-green-300/40 shadow-2xl">
-            <h3 className="text-2xl font-bold text-green-900 dark:text-green-100 mb-6 text-center">🤖 AI Activity Recommendations</h3>
-            <div className="space-y-4">
-              {getAIRecommendations().length > 0 ? (
-                getAIRecommendations().map((rec, index) => (
-                  <div key={index} className="flex items-center bg-green-50/50 dark:bg-green-500/10 rounded-2xl p-4">
-                    <div className="text-3xl mr-4">{rec.icon}</div>
-                    <div>
-                      <div className="text-lg font-bold text-gray-900 dark:text-white">{rec.activity}</div>
-                      <div className="text-green-700 dark:text-green-200 text-sm">{rec.reason}</div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center text-gray-900 dark:text-white">
-                  No specific recommendations at this time. Check back later or explore general activities!
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {/* Footer */}
-        <div className="text-center mt-12 pb-8">
-          <p className="text-slate-500 dark:text-slate-400 text-lg">
-            Powered by Open-Meteo Marine API
-          </p>
-        </div>
+          {marineDisclaimer && (
+            <p className="px-2 text-xs leading-6 text-slate-500">{marineDisclaimer}</p>
+          )}
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
 

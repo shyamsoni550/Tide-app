@@ -1,3 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    background: #040D1A;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    background: #040D1A;
+    color: #E6F7FF;
+    font-family: "Inter", sans-serif;
+  }
+
+  * {
+    scrollbar-color: rgba(0, 212, 255, 0.45) rgba(4, 13, 26, 0.85);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.045));
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35), 0 0 34px rgba(0, 212, 255, 0.12);
+    backdrop-filter: blur(20px);
+  }
+
+  .ocean-grid {
+    background-image:
+      linear-gradient(rgba(0, 212, 255, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 212, 255, 0.055) 1px, transparent 1px);
+    background-size: 52px 52px;
+  }
+
+  .input-glow {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(4, 13, 26, 0.6);
+    color: white;
+    transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  }
+
+  .input-glow:focus {
+    border-color: #00D4FF;
+    box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.14), 0 0 26px rgba(0, 212, 255, 0.22);
+    outline: none;
+  }
+}

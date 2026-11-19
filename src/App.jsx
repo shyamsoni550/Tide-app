@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion as Motion } from "framer-motion";
 import {
   Anchor,
@@ -7,12 +7,12 @@ import {
   Compass,
   LocateFixed,
   LogOut,
-  MapPin,
   Navigation,
   Sailboat,
   Sparkles,
   Thermometer,
   Trash2,
+  UserRound,
   Waves,
   Wind,
 } from "lucide-react";
@@ -41,6 +41,17 @@ const cardVariants = {
 
 function App() {
   const auth = useAuth();
+  const displayName = auth.user?.user_metadata?.full_name || auth.user?.email || "Guest explorer";
+  const profileInitials = auth.user?.user_metadata?.full_name
+    ?.trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((namePart) => namePart[0])
+    .join("")
+    .toUpperCase() || auth.user?.email?.slice(0, 2).toUpperCase();
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
   const [guestMode, setGuestMode] = useState(false);
   const [tideInfo, setTideInfo] = useState(null);
   const [tide, setTide] = useState(null);
@@ -64,6 +75,26 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.add("dark");
   }, []);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return undefined;
+
+    const closeOnOutsideClick = (event) => {
+      if (!profileMenuRef.current?.contains(event.target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setProfileMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [profileMenuOpen]);
 
   useEffect(() => {
     if (storedLocation && !coordinates) {
@@ -308,12 +339,50 @@ function App() {
                   A modern coastal dashboard for tide windows, marine conditions, wind, and activity recommendations.
                 </p>
               </div>
-              <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 text-right">
-                <div className="font-display text-3xl font-bold text-white">
-                  {currentTime.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })}
-                </div>
-                <div className="mt-1 text-sm text-slate-400">
-                  {currentTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+              <div ref={profileMenuRef} className="relative flex flex-col items-end gap-3">
+                <button
+                  type="button"
+                  aria-label="Open profile menu"
+                  aria-expanded={profileMenuOpen}
+                  aria-controls="profile-menu"
+                  onClick={() => setProfileMenuOpen((isOpen) => !isOpen)}
+                  className="flex h-12 w-12 items-center justify-center rounded-full border border-ocean-teal/30 bg-ocean-teal/10 font-display font-bold text-ocean-teal transition hover:border-ocean-teal/60 hover:bg-ocean-teal/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ocean-cyan"
+                >
+                  {profileInitials || <UserRound aria-hidden="true" className="h-5 w-5" />}
+                </button>
+                {profileMenuOpen && (
+                  <div
+                    id="profile-menu"
+                    role="group"
+                    aria-label="Profile menu"
+                    className="w-64 rounded-2xl border border-white/10 bg-slate-950/95 p-4 text-left shadow-2xl backdrop-blur-xl"
+                  >
+                    <p className="truncate font-semibold text-white">{displayName}</p>
+                    <p className="mt-1 truncate text-sm text-slate-400">
+                      {auth.user?.email || "Guest session"}
+                    </p>
+                    {auth.user && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          auth.signOut();
+                        }}
+                        className="mt-4 flex w-full items-center gap-2 rounded-xl border-t border-white/10 pt-4 text-sm font-semibold text-slate-300 transition hover:text-ocean-teal"
+                      >
+                        <LogOut aria-hidden="true" className="h-4 w-4" />
+                        Sign out
+                      </button>
+                    )}
+                  </div>
+                )}
+                <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 text-right">
+                  <div className="font-display text-3xl font-bold text-white">
+                    {currentTime.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-400">
+                    {currentTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                  </div>
                 </div>
               </div>
             </div>
@@ -375,16 +444,9 @@ function App() {
               animate="show"
               className="glass-panel rounded-[2rem] p-6 sm:p-7"
             >
-              <div className="flex items-center gap-3">
-                <div className="rounded-2xl bg-ocean-teal/10 p-3 text-ocean-teal">
-                  <MapPin className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-sm text-slate-400">Signed in as</p>
-                  <p className="font-semibold text-white">
-                    {auth.user?.user_metadata?.full_name || auth.user?.email || "Guest explorer"}
-                  </p>
-                </div>
+              <div>
+                <p className="text-sm text-slate-400">Signed in as</p>
+                <p className="break-words font-semibold text-white">{displayName}</p>
               </div>
               <p className="mt-5 text-sm leading-6 text-slate-400">
                 Saved locations sync to Supabase when you are logged in. Guest mode stores the latest location in this browser.

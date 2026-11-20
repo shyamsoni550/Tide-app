@@ -1,16 +1,20 @@
 # Tide Tracker
 
-React application for modeled tide levels, waves, weather, and coastal activity guidance. Tide and wave data come from the free Open-Meteo Marine API. User accounts and saved locations use Supabase.
+Tide Tracker is a React coastal dashboard for modeled tide levels, waves, weather, and activity guidance. Tide and marine data comes from Open-Meteo, while authentication and saved locations are powered by Supabase.
 
 ## Features
 
-- Email/password login and signup
+- Protected email/password login and signup
 - Persistent Supabase sessions
+- Account required to access the dashboard
 - Per-user saved locations protected by Row Level Security
 - Open-Meteo modeled high and low tide detection
-- Current sea level, wave height, wave period, and swell height
-- Weather and wind-based activity recommendations
-- Dark mode and local location persistence
+- Three-day tide forecasts with an animated high/low tide chart
+- Current sea level, wave height, wave period, direction, and swell height
+- Live weather, wind, daylight, and activity recommendations
+- Browser geolocation and searchable location selection
+- Profile menu with account details and sign-out controls
+- Dark mode and browser-persisted location preferences
 
 ## Local Setup
 
@@ -41,7 +45,7 @@ Start the app:
 npm run dev
 ```
 
-Without Supabase environment variables, the app offers guest mode. Login, signup, and cloud-saved locations become active after Supabase is configured.
+Supabase configuration is required to access the website. The dashboard is unavailable until a user signs in or creates an account, and no continue-as-guest mode is offered.
 
 ## Authentication
 

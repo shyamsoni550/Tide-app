@@ -41,7 +41,7 @@ const cardVariants = {
 
 function App() {
   const auth = useAuth();
-  const displayName = auth.user?.user_metadata?.full_name || auth.user?.email || "Guest explorer";
+  const displayName = auth.user?.user_metadata?.full_name || auth.user?.email || "Tide Tracker member";
   const profileInitials = auth.user?.user_metadata?.full_name
     ?.trim()
     .split(/\s+/)
@@ -52,7 +52,6 @@ function App() {
     .toUpperCase() || auth.user?.email?.slice(0, 2).toUpperCase();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
-  const [guestMode, setGuestMode] = useState(false);
   const [tideInfo, setTideInfo] = useState(null);
   const [tide, setTide] = useState(null);
   const [nextHighTide, setNextHighTide] = useState(null);
@@ -272,13 +271,12 @@ function App() {
     );
   }
 
-  if (!auth.session && !guestMode) {
+  if (!auth.session) {
     return (
       <AuthForm
         isConfigured={auth.isConfigured}
         onSignIn={auth.signIn}
         onSignUp={auth.signUp}
-        onContinueAsGuest={() => setGuestMode(true)}
       />
     );
   }
@@ -303,7 +301,7 @@ function App() {
               </button>
             ))}
           </nav>
-          {auth.user ? (
+          {auth.user && (
             <button
               type="button"
               onClick={auth.signOut}
@@ -312,10 +310,6 @@ function App() {
             >
               <LogOut className="h-5 w-5" />
             </button>
-          ) : (
-            <span className="rounded-full border border-ocean-teal/30 px-3 py-1 text-xs font-bold text-ocean-teal lg:-rotate-90">
-              Guest
-            </span>
           )}
         </aside>
 
@@ -359,21 +353,19 @@ function App() {
                   >
                     <p className="truncate font-semibold text-white">{displayName}</p>
                     <p className="mt-1 truncate text-sm text-slate-400">
-                      {auth.user?.email || "Guest session"}
+                      {auth.user?.email}
                     </p>
-                    {auth.user && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          auth.signOut();
-                        }}
-                        className="mt-4 flex w-full items-center gap-2 rounded-xl border-t border-white/10 pt-4 text-sm font-semibold text-slate-300 transition hover:text-ocean-teal"
-                      >
-                        <LogOut aria-hidden="true" className="h-4 w-4" />
-                        Sign out
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        auth.signOut();
+                      }}
+                      className="mt-4 flex w-full items-center gap-2 rounded-xl border-t border-white/10 pt-4 text-sm font-semibold text-slate-300 transition hover:text-ocean-teal"
+                    >
+                      <LogOut aria-hidden="true" className="h-4 w-4" />
+                      Sign out
+                    </button>
                   </div>
                 )}
                 <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 text-right">
@@ -449,7 +441,7 @@ function App() {
                 <p className="break-words font-semibold text-white">{displayName}</p>
               </div>
               <p className="mt-5 text-sm leading-6 text-slate-400">
-                Saved locations sync to Supabase when you are logged in. Guest mode stores the latest location in this browser.
+                Saved locations sync securely to your Supabase account and remain available across your sessions.
               </p>
             </Motion.section>
           </div>

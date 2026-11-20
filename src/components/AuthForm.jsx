@@ -10,7 +10,7 @@ const bubbles = Array.from({ length: 18 }, (_, index) => ({
   duration: `${8 + (index % 6)}s`,
 }));
 
-const AuthForm = ({ isConfigured, onSignIn, onSignUp, onContinueAsGuest }) => {
+const AuthForm = ({ isConfigured, onSignIn, onSignUp }) => {
   const [mode, setMode] = useState("login");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -195,14 +195,6 @@ const AuthForm = ({ isConfigured, onSignIn, onSignUp, onContinueAsGuest }) => {
                 </Motion.button>
               </form>
             )}
-
-            <button
-              type="button"
-              onClick={onContinueAsGuest}
-              className="mt-5 w-full rounded-full border border-white/10 px-5 py-3 text-sm font-bold text-slate-300 transition hover:border-ocean-cyan/40 hover:text-white"
-            >
-              Continue in guest mode
-            </button>
           </Motion.div>
         </section>
       </div>
